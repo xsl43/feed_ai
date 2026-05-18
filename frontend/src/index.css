@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #FAFAFA;
+  color: #333333;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-weibo-primary text-white px-6 py-2 rounded-full font-medium
+           hover:bg-weibo-primary-hover transition-colors duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-outline {
+    @apply border border-weibo-border-strong text-weibo-text px-6 py-2 rounded-full font-medium
+           hover:bg-weibo-bg transition-colors duration-200;
+  }
+
+  .card {
+    @apply bg-white rounded-xl border border-weibo-border p-4;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 rounded-lg border border-weibo-border
+           bg-weibo-bg text-weibo-text placeholder-weibo-text-muted
+           focus:outline-none focus:border-weibo-primary focus:bg-white
+           transition-colors duration-200;
+  }
+}

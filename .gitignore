@@ -1,0 +1,36 @@
+# Dependencies
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+backend/cmd/server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Environment
+.env
+.env.local
+
+# Uploads / runtime data
+backend/.run/
+*.log
+
+# Temp files
+*.tmp
+tmp/

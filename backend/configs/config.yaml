@@ -1,0 +1,49 @@
+server:
+  port: 8080
+
+database:
+  host: localhost
+  port: 3307
+  user: root
+  password: 123456
+  dbname: feedsystem
+
+redis:
+  host: localhost
+  port: 6379
+  password: 123456
+  db: 0
+
+rabbitmq:
+  host: localhost
+  port: 5672
+  username: admin
+  password: password123
+  
+observability:
+  pprof:
+    enabled: true
+    api_addr: localhost:6060
+    worker_addr: localhost:6061
+
+# AI 配置 (硅基流动 DeepSeek + ASR)
+ai:
+  api_key: ""  # 设置你的 API Key
+  base_url: "https://api.siliconflow.cn/v1"
+  model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+  asr_model: "TeleAI/TeleSpeechASR"
+
+# 媒体处理配置
+media:
+  upload_dir: "./.run/uploads"
+  ffmpeg_path: "ffmpeg"
+  ytdlp_path: "yt-dlp"
+  max_file_size_mb: 2048
+
+# MinIO 对象存储
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  bucket: "media"
+  use_ssl: false
