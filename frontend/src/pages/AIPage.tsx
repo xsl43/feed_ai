@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { mediaAPI, aiAPI } from '../api'
-import type { AIConfig, AIConfigUpdate } from '../api'
+import { Link } from 'react-router-dom'
+import { mediaAPI, aiAPI, reviewAPI } from '../api'
+import type { AIConfig, AIConfigUpdate, ReviewConfig } from '../api'
 import type { MediaFile } from '../types'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
@@ -24,6 +25,9 @@ export default function AIPage() {
   const [asrModel, setAsrModel] = useState('FunAudioLLM/SenseVoiceSmall')
   const [savedConfig, setSavedConfig] = useState<AIConfig | null>(null)
   const [showKey, setShowKey] = useState(false)
+
+  // ──────────── 审核配置状态 ────────────
+  const [reviewCfg, setReviewCfg] = useState<ReviewConfig | null>(null)
 
   // 加载已保存的配置
   const loadConfig = async () => {
@@ -73,12 +77,24 @@ export default function AIPage() {
     }
   }
 
+  // 加载审核配置
+  const loadReviewConfig = async () => {
+    try {
+      const { data } = await reviewAPI.getConfig()
+      setReviewCfg(data)
+    } catch { /* use defaults */ }
+  }
+
+  // 保存审核配置
+
+
   useEffect(() => {
     if (!isLoggedIn) { setLoading(false); return }
     mediaAPI.list().then(({ data }) => {
       setFiles(data || [])
     }).catch(() => {}).finally(() => setLoading(false))
     loadConfig()
+    loadReviewConfig()
   }, [isLoggedIn])
 
   const handleAnalyze = async (mediaId: number) => {
@@ -257,6 +273,52 @@ export default function AIPage() {
                 <p>模型：<span className="text-weibo-text-secondary">{savedConfig.model}</span> | ASR：<span className="text-weibo-text-secondary">{savedConfig.asr_model}</span></p>
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* ──────────── 审核配置面板 ──────────── */}
+      <div className="card mb-4">
+        <button
+          onClick={() => { if (!reviewCfg) loadReviewConfig() }}
+          className="w-full flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-weibo-link" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            <span className="font-semibold text-weibo-text">内容审核状态</span>
+            {reviewCfg && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${reviewCfg.enabled ? 'text-green-500 bg-green-50' : 'text-yellow-500 bg-yellow-50'}`}>
+                {reviewCfg.enabled ? '已启用' : '已禁用'}
+              </span>
+            )}
+          </div>
+        </button>
+
+        {reviewCfg && (
+          <div className="mt-4 pt-4 border-t border-weibo-border space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-weibo-text-muted">文本审核模型</span>
+              <span className="text-weibo-text-secondary">{reviewCfg.text_model}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-weibo-text-muted">视觉审核模型</span>
+              <span className="text-weibo-text-secondary">{reviewCfg.vision_model}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-weibo-text-muted">置信度阈值 / 灰区下限</span>
+              <span className="text-weibo-text-secondary">{reviewCfg.confidence_threshold} / {reviewCfg.manual_review_threshold}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-weibo-text-muted">帧审核模式</span>
+              <span className="text-weibo-text-secondary">
+                {reviewCfg.frame_review_mode === 'off' ? '关闭' : reviewCfg.frame_review_mode === 'on' ? '开启' : '自动'}
+              </span>
+            </div>
+            <Link to="/admin/review" className="block text-xs text-weibo-link hover:text-weibo-primary mt-2">
+              管理审核配置 &rarr;
+            </Link>
           </div>
         )}
       </div>

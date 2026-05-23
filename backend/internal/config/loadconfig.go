@@ -18,10 +18,12 @@ type Config struct {
 	AI                  AIConfig            `yaml:"ai"`
 	Media               MediaConfig         `yaml:"media"`
 	MinIO               MinIOConfig         `yaml:"minio"`
+	Review              ReviewConfig        `yaml:"review"`
 }
 
 type ServerConfig struct {
-	Port int `yaml:"port"`
+	Port     int   `yaml:"port"`
+	AdminIDs []uint `yaml:"admin_ids"`
 }
 
 type DatabaseConfig struct {
@@ -69,6 +71,18 @@ type MediaConfig struct {
 	FFmpegPath   string `yaml:"ffmpeg_path"`
 	YtDlpPath    string `yaml:"ytdlp_path"`
 	MaxFileSizeMB int64 `yaml:"max_file_size_mb"`
+}
+
+// 内容审核配置
+type ReviewConfig struct {
+	Enabled               bool    `yaml:"enabled"`
+	TextModel             string  `yaml:"text_model"`
+	VisionModel           string  `yaml:"vision_model"`
+	SampleFrames          int     `yaml:"sample_frames"`
+	FrameReviewMode       string  `yaml:"frame_review_mode"`
+	ConfidenceThreshold   float64 `yaml:"confidence_threshold"`
+	ManualReviewThreshold float64 `yaml:"manual_review_threshold"`
+	MaxRetries            int     `yaml:"max_retries"`
 }
 
 // MinIO 对象存储配置
@@ -217,6 +231,16 @@ func DefaultLocalConfig() Config {
 			SecretKey: "minioadmin",
 			Bucket:    "media",
 			UseSSL:    false,
+		},
+		Review: ReviewConfig{
+			Enabled:               true,
+			TextModel:             "deepseek-ai/DeepSeek-V3",
+			VisionModel:           "Qwen/Qwen2.5-VL-32B-Instruct",
+			SampleFrames:          5,
+			FrameReviewMode:       "off",
+			ConfidenceThreshold:   0.7,
+			ManualReviewThreshold: 0.5,
+			MaxRetries:            3,
 		},
 	}
 	ApplyEnvOverrides(&cfg)

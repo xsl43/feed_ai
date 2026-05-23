@@ -17,6 +17,7 @@ export default defineConfig({
       '/ai': 'http://localhost:8080',
       '/media': 'http://localhost:8080',
       '/static': 'http://localhost:8080',
+      '/review': 'http://localhost:8080',
     }
   }
 })

@@ -9,6 +9,8 @@ export interface Video {
   create_time: string
   likes_count: number
   popularity: number
+  review_status?: string
+  review_reason?: string
 }
 
 export interface FeedVideoItem {

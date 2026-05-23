@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { videoAPI } from '../api'
+import { videoAPI, reviewAPI } from '../api'
 import type { Video } from '../types'
 import VideoPlayer from '../components/VideoPlayer'
 import CommentDrawer from '../components/CommentDrawer'
 import { LikeButton, FollowButton } from '../components/Buttons'
+import { useAuthStore } from '../store/authStore'
 import { formatDate, formatCount } from '../utils/time'
+import toast from 'react-hot-toast'
 
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [video, setVideo] = useState<Video | null>(null)
   const [loading, setLoading] = useState(true)
   const [showComments, setShowComments] = useState(false)
+  const { user } = useAuthStore()
 
   useEffect(() => {
     if (!id) return
@@ -28,8 +31,46 @@ export default function VideoDetailPage() {
     return <div className="text-center py-16 text-weibo-text-muted">视频不存在</div>
   }
 
+  const isOwner = user?.id === video.author_id
+
+  const handleReSubmit = async () => {
+    try {
+      await reviewAPI.reSubmit(video.id, video.title, video.description || '')
+      toast.success('已重新提交审核')
+      video.review_status = 'pending'
+      video.review_reason = ''
+      setVideo({ ...video })
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || '重新提交失败')
+    }
+  }
+
   return (
     <div className="max-w-4xl mx-auto">
+      {/* 审核状态提示 (仅作者可见) */}
+      {isOwner && video.review_status && video.review_status !== 'approved' && (
+        <div className={`mb-3 p-3 rounded-lg text-sm ${
+          video.review_status === 'pending' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' :
+          'bg-red-50 text-red-700 border border-red-200'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">
+                {video.review_status === 'pending' ? '审核中' : '审核未通过'}
+              </p>
+              {video.review_reason && (
+                <p className="text-xs mt-0.5">原因: {video.review_reason}</p>
+              )}
+            </div>
+            {video.review_status === 'rejected' && (
+              <button onClick={handleReSubmit} className="text-xs bg-red-100 hover:bg-red-200 px-3 py-1 rounded-full font-medium transition-colors">
+                重新提交
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 视频播放器 */}
       <VideoPlayer src={video.play_url} poster={video.cover_url} className="mb-4" />
 

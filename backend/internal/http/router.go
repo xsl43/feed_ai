@@ -6,6 +6,7 @@ import (
 	"feedsystem_ai_go/internal/config"
 	"feedsystem_ai_go/internal/feed"
 	"feedsystem_ai_go/internal/message"
+	"feedsystem_ai_go/internal/middleware/admin"
 	"feedsystem_ai_go/internal/middleware/jwt"
 	"feedsystem_ai_go/internal/middleware/rabbitmq"
 	"feedsystem_ai_go/internal/middleware/ratelimit"
@@ -19,6 +20,7 @@ import (
 	appai "feedsystem_ai_go/internal/ai"
 	"feedsystem_ai_go/internal/media"
 	mediastorage "feedsystem_ai_go/internal/media/storage"
+	"feedsystem_ai_go/internal/review"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -29,6 +31,9 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 	r := gin.Default()
 	if err := r.SetTrustedProxies(nil); err != nil {
 		log.Printf("SetTrustedProxies failed: %v", err)
+	}
+	if len(cfg.Server.AdminIDs) > 0 {
+		admin.SetAdminIDs(cfg.Server.AdminIDs)
 	}
 	r.Static("/static", "./.run/uploads")
 	// rate_limit
@@ -60,6 +65,21 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		protectedAccountGroup.POST("/uploadAvatar", accountHandler.UploadAvatar)
 		protectedAccountGroup.POST("/updateProfile", accountHandler.UpdateProfile)
 	}
+	// review service - created early so it can be injected into video/comment/AI
+	reviewCfg := review.ReviewConfig{
+		Enabled:               cfg.Review.Enabled,
+		TextModel:             cfg.Review.TextModel,
+		VisionModel:           cfg.Review.VisionModel,
+		SampleFrames:          cfg.Review.SampleFrames,
+		FrameReviewMode:       cfg.Review.FrameReviewMode,
+		ConfidenceThreshold:   cfg.Review.ConfidenceThreshold,
+		ManualReviewThreshold: cfg.Review.ManualReviewThreshold,
+		MaxRetries:            cfg.Review.MaxRetries,
+		APIKey:                cfg.AI.APIKey,
+		BaseURL:               cfg.AI.BaseURL,
+	}
+	reviewService := review.NewReviewService(reviewCfg)
+
 	// video
 	videoRepository := video.NewVideoRepository(db)
 	popularityMQ, err := rabbitmq.NewPopularityMQ(rmq)
@@ -68,6 +88,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		popularityMQ = nil
 	}
 	videoService := video.NewVideoService(videoRepository, cache, popularityMQ)
+	videoService.SetReviewService(reviewService)
 	videoHandler := video.NewVideoHandler(videoService, accountService)
 	videoGroup := r.Group("/video")
 	{
@@ -107,6 +128,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		commentMQ = nil
 	}
 	commentService := video.NewCommentService(commentRepository, videoRepository, cache, commentMQ, popularityMQ)
+	commentService.SetReviewService(reviewService)
 	commentHandler := video.NewCommentHandler(commentService, accountService)
 	commentGroup := r.Group("/comment")
 	{
@@ -244,6 +266,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 	minioClient, minioErr := mediastorage.NewMinIOClient(cfg.MinIO)
 	aiService := appai.NewAIService(cfg.AI, cfg.Media)
 	aiHandler := appai.NewAIHandler(db, aiService, rdb)
+	aiHandler.SetReviewService(reviewService)
 	aiGroup := r.Group("/ai")
 	aiGroup.Use(jwt.JWTAuth(accountRepository, cache))
 	{
@@ -273,6 +296,26 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		}
 	} else {
 		log.Printf("MinIO not available, media upload disabled: %v", minioErr)
+	}
+
+	// ========== 内容审核模块 ==========
+	reviewHandler := NewReviewHandler(db, reviewService, videoService)
+	reviewGroup := r.Group("/review")
+	reviewGroup.Use(jwt.JWTAuth(accountRepository, cache))
+	{
+		reviewGroup.GET("/config", reviewHandler.GetReviewConfig)
+		reviewGroup.GET("/status/:videoId", reviewHandler.GetVideoReviewStatus)
+		reviewGroup.POST("/resubmit", reviewHandler.ReSubmitVideo)
+	}
+	// 人工审核端点（需要管理员权限）
+	adminReviewGroup := r.Group("/review")
+	adminReviewGroup.Use(jwt.JWTAuth(accountRepository, cache))
+	adminReviewGroup.Use(admin.RequireAdmin())
+	{
+		adminReviewGroup.POST("/config", reviewHandler.UpdateReviewConfig)
+		adminReviewGroup.POST("/video/:id/approve", reviewHandler.ApproveVideo)
+		adminReviewGroup.POST("/video/:id/reject", reviewHandler.RejectVideo)
+		adminReviewGroup.GET("/pending", reviewHandler.GetPendingVideos)
 	}
 
 	return r

@@ -83,6 +83,13 @@ export default function ProfilePage() {
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
                 <p className="text-white text-xs line-clamp-1">{v.title}</p>
               </div>
+              {isSelf && v.review_status && v.review_status !== 'approved' && (
+                <div className={`absolute top-2 left-2 text-2xs px-1.5 py-0.5 rounded ${
+                  v.review_status === 'pending' ? 'bg-yellow-400 text-yellow-900' : 'bg-red-500 text-white'
+                }`}>
+                  {v.review_status === 'pending' ? '审核中' : '未通过'}
+                </div>
+              )}
               <div className="absolute top-2 right-2 bg-black/50 text-white text-2xs px-1.5 py-0.5 rounded">
                 👍 {formatCount(v.likes_count)}
               </div>

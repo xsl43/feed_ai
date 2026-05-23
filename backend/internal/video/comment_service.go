@@ -3,8 +3,10 @@
 import (
 	"context"
 	"errors"
+	"log"
 	"feedsystem_ai_go/internal/middleware/rabbitmq"
 	rediscache "feedsystem_ai_go/internal/middleware/redis"
+	"feedsystem_ai_go/internal/review"
 	"feedsystem_ai_go/internal/apierror"
 	"regexp"
 	"strings"
@@ -18,10 +20,15 @@ type CommentService struct {
 	cache           *rediscache.Client
 	commentMQ       *rabbitmq.CommentMQ
 	popularityMQ    *rabbitmq.PopularityMQ
+	reviewService   *review.ReviewService
 }
 
 func NewCommentService(repo *CommentRepository, videoRepo *VideoRepository, cache *rediscache.Client, commentMQ *rabbitmq.CommentMQ, popularityMQ *rabbitmq.PopularityMQ) *CommentService {
 	return &CommentService{repo: repo, VideoRepository: videoRepo, cache: cache, commentMQ: commentMQ, popularityMQ: popularityMQ}
+}
+
+func (s *CommentService) SetReviewService(rs *review.ReviewService) {
+	s.reviewService = rs
 }
 
 func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
@@ -45,9 +52,11 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 		return errors.New("video not found")
 	}
 
+	reviewEnabled := s.reviewService != nil && s.reviewService.IsEnabled()
+
 	mysqlEnqueued := false
 	redisEnqueued := false
-	if s.commentMQ != nil {
+	if s.commentMQ != nil && !reviewEnabled {
 		if err := s.commentMQ.Publish(ctx, comment.Username, comment.VideoID, comment.AuthorID, comment.Content); err == nil {
 			mysqlEnqueued = true
 		}
@@ -62,7 +71,7 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 		return nil
 	}
 
-	// Fallback: direct MySQL write when comment MQ publish fails.
+	// Write comment directly to DB (for review flow or MQ fallback)
 	if !mysqlEnqueued {
 		if err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := tx.Select("id").First(&Video{}, comment.VideoID).Error; err != nil {
@@ -81,11 +90,31 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 		}
 	}
 
-	// Fallback: direct Redis update when popularity MQ publish fails.
 	if !redisEnqueued {
 		UpdatePopularityCache(ctx, s.cache, comment.VideoID, 1)
 	}
 	s.notifyMentions(ctx, comment)
+
+	// Async review for comments (先发后审)
+	if reviewEnabled {
+		commentID := comment.ID
+		content := comment.Content
+		go func() {
+			result, err := s.reviewService.ReviewText(content, "")
+			if err != nil {
+				log.Printf("[Review] 评论审核失败 commentID=%d: %v", commentID, err)
+				return
+			}
+			log.Printf("[Review] 评论审核完成 commentID=%d: status=%s confidence=%.2f", commentID, result.Status, result.Confidence)
+			if s.reviewService.Classify(result) == "rejected" {
+				s.repo.db.Model(&Comment{}).Where("id = ?", commentID).Updates(map[string]interface{}{
+					"review_status": "rejected",
+					"review_reason": result.Reason,
+				})
+			}
+		}()
+	}
+
 	return nil
 }
 

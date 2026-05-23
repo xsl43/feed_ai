@@ -6,6 +6,7 @@ import VideoDetailPage from './pages/VideoDetailPage'
 import ProfilePage from './pages/ProfilePage'
 import PublishPage from './pages/PublishPage'
 import MessagesPage from './pages/MessagesPage'
+import AdminReviewPage from './pages/AdminReviewPage'
 import AIPage from './pages/AIPage'
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/publish" element={<PublishPage />} />
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/ai" element={<AIPage />} />
+        <Route path="/admin/review" element={<AdminReviewPage />} />
       </Route>
       <Route path="/login" element={<LoginPage />} />
     </Routes>

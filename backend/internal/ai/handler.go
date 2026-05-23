@@ -11,6 +11,7 @@ import (
 	"feedsystem_ai_go/internal/config"
 	"feedsystem_ai_go/internal/ratelimit"
 	"feedsystem_ai_go/internal/retry"
+	"feedsystem_ai_go/internal/review"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -18,13 +19,18 @@ import (
 )
 
 type AIHandler struct {
-	db        *gorm.DB
-	aiService *AIService
-	redis     *redis.Client
+	db            *gorm.DB
+	aiService     *AIService
+	redis         *redis.Client
+	reviewService *review.ReviewService
 }
 
 func NewAIHandler(db *gorm.DB, aiService *AIService, redis *redis.Client) *AIHandler {
 	return &AIHandler{db: db, aiService: aiService, redis: redis}
+}
+
+func (h *AIHandler) SetReviewService(rs *review.ReviewService) {
+	h.reviewService = rs
 }
 
 // TriggerAnalysis POST /ai/analyze
@@ -79,7 +85,24 @@ func (h *AIHandler) TriggerAnalysis(c *gin.Context) {
 			media.Status = "COMPLETED"
 			h.db.Save(&media)
 
-			// 清除 Redis 缓存
+			// Async review AI summary
+			if h.reviewService != nil && h.reviewService.IsEnabled() {
+				go func() {
+					reviewResult, err := h.reviewService.ReviewText(result.Summary, "")
+					if err != nil {
+						log.Printf("[Review] AI summary review failed mediaID=%d: %v", media.ID, err)
+						return
+					}
+					if h.reviewService.Classify(reviewResult) == "rejected" {
+						h.db.Model(&media).Updates(map[string]interface{}{
+							"ai_summary": "[此内容因违规被隐藏]",
+						})
+						log.Printf("[Review] AI summary hidden mediaID=%d confidence=%.2f", media.ID, reviewResult.Confidence)
+					}
+				}()
+			}
+
+			// Clear Redis cache
 			if h.redis != nil {
 				userIDStr := "anon"
 				if media.UserID != nil {

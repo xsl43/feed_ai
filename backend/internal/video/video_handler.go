@@ -232,7 +232,8 @@ func (vh *VideoHandler) GetDetail(c *gin.Context) {
 		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
 		return
 	}
-	video, err := vh.service.GetDetail(c.Request.Context(), req.ID)
+	viewerID, _ := jwt.GetAccountID(c)
+	video, err := vh.service.GetDetail(c.Request.Context(), req.ID, viewerID)
 	if err != nil {
 		c.JSON(apierror.ClassifyHTTPStatus(err), gin.H{"error": err.Error()})
 		return

@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { videoAPI } from '../api'
+import { videoAPI, reviewAPI } from '../api'
+import type { ReviewStatus } from '../api/review'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 
@@ -13,6 +14,8 @@ export default function PublishPage() {
   const [coverPreview, setCoverPreview] = useState('')
   const [uploading, setUploading] = useState(false)
   const [publishing, setPublishing] = useState(false)
+  const [publishResult, setPublishResult] = useState<{ id: number; review_status: string } | null>(null)
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatus | null>(null)
   const { isLoggedIn } = useAuthStore()
   const navigate = useNavigate()
   const videoInputRef = useRef<HTMLInputElement>(null)
@@ -40,6 +43,28 @@ export default function PublishPage() {
     setCoverPreview(URL.createObjectURL(f))
   }
 
+  const pollReviewStatus = async (videoId: number) => {
+    const poll = async () => {
+      try {
+        const { data } = await reviewAPI.getStatus(videoId)
+        setReviewStatus(data)
+        if (data.review_status === 'approved') {
+          toast.success('审核通过! 视频已发布')
+          setTimeout(() => navigate(`/video/${videoId}`), 1500)
+          return
+        }
+        if (data.review_status === 'rejected') {
+          toast.error(`审核未通过: ${data.review_reason || '违规内容'}`)
+          return
+        }
+        setTimeout(() => poll(), 3000)
+      } catch {
+        setTimeout(() => poll(), 3000)
+      }
+    }
+    poll()
+  }
+
   const handlePublish = async () => {
     if (!isLoggedIn) { toast.error('请先登录'); return }
     if (!title.trim()) { toast.error('请输入标题'); return }
@@ -59,15 +84,23 @@ export default function PublishPage() {
       toast.dismiss()
 
       setPublishing(true)
-      await videoAPI.publish({
+      const pubRes = await videoAPI.publish({
         title: title.trim(),
         description: description.trim(),
         play_url: playUrl,
         cover_url: coverUrl,
       })
 
-      toast.success('发布成功!')
-      navigate('/')
+      const videoData = pubRes.data
+      setPublishResult({ id: videoData.id, review_status: videoData.review_status || 'pending' })
+
+      if (!videoData.review_status || videoData.review_status === 'pending') {
+        toast.success('视频已提交，正在审核中...')
+        pollReviewStatus(videoData.id)
+      } else {
+        toast.success('发布成功!')
+        navigate('/')
+      }
     } catch (err: any) {
       toast.dismiss()
       toast.error(err.response?.data?.error || '发布失败')
@@ -169,6 +202,32 @@ export default function PublishPage() {
             </div>
           </div>
         </div>
+
+        {/* 审核状态 */}
+        {publishResult && (
+          <div className={`p-3 rounded-lg text-sm ${
+            reviewStatus?.review_status === 'approved' ? 'bg-green-50 text-green-700' :
+            reviewStatus?.review_status === 'rejected' ? 'bg-red-50 text-red-700' :
+            'bg-blue-50 text-blue-700'
+          }`}>
+            {reviewStatus?.review_status === 'approved' && <p>审核已通过，即将跳转...</p>}
+            {reviewStatus?.review_status === 'rejected' && (
+              <div>
+                <p className="font-medium">审核未通过</p>
+                {reviewStatus.review_reason && <p className="text-xs mt-1">{reviewStatus.review_reason}</p>}
+                <button
+                  onClick={() => { setPublishResult(null); setReviewStatus(null) }}
+                  className="mt-2 text-xs underline"
+                >
+                  修改后重新提交
+                </button>
+              </div>
+            )}
+            {(!reviewStatus || reviewStatus.review_status === 'pending') && (
+              <p>正在审核中，请稍候...</p>
+            )}
+          </div>
+        )}
 
         {/* 发布按钮 */}
         <button

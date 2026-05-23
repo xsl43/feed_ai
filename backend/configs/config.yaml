@@ -1,9 +1,10 @@
 server:
   port: 8080
+  admin_ids: [1, 6]
 
 database:
   host: localhost
-  port: 3307
+  port: 3306
   user: root
   password: 123456
   dbname: feedsystem
@@ -39,6 +40,17 @@ media:
   ffmpeg_path: "ffmpeg"
   ytdlp_path: "yt-dlp"
   max_file_size_mb: 2048
+
+# 内容审核配置
+review:
+  enabled: true
+  text_model: "deepseek-ai/DeepSeek-V3"
+  vision_model: "Qwen/Qwen2.5-VL-32B-Instruct"
+  sample_frames: 5
+  frame_review_mode: "off"
+  confidence_threshold: 0.7
+  manual_review_threshold: 0.5
+  max_retries: 3
 
 # MinIO 对象存储
 minio:

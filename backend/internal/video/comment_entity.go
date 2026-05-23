@@ -3,12 +3,14 @@ package video
 import "time"
 
 type Comment struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Username  string    `gorm:"index" json:"username"`
-	VideoID   uint      `gorm:"index" json:"video_id"`
-	AuthorID  uint      `gorm:"index" json:"author_id"`
-	Content   string    `gorm:"type:text" json:"content"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Username     string    `gorm:"index" json:"username"`
+	VideoID      uint      `gorm:"index" json:"video_id"`
+	AuthorID     uint      `gorm:"index" json:"author_id"`
+	Content      string    `gorm:"type:text" json:"content"`
+	CreatedAt    time.Time `gorm:"autoCreateTime" json:"created_at"`
+	ReviewStatus string    `gorm:"type:varchar(20);default:approved;index" json:"review_status"`
+	ReviewReason string    `gorm:"type:text" json:"review_reason,omitempty"`
 }
 
 type PublishCommentRequest struct {
