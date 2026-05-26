@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -114,9 +115,13 @@ func (s *ReviewService) ReviewTextWithRetry(title, content string) (*ReviewResul
 }
 
 // ReviewImageWithRetry calls ReviewImage with retry on failure.
-func (s *ReviewService) ReviewImageWithRetry(imagePath string) (*ReviewResult, error) {
+func (s *ReviewService) ReviewImageWithRetry(reader io.Reader) (*ReviewResult, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
 	return s.reviewWithRetry(func() (*ReviewResult, error) {
-		return s.ReviewImage(imagePath)
+		return s.ReviewImage(bytes.NewReader(data))
 	})
 }
 
@@ -145,26 +150,15 @@ func (s *ReviewService) ReviewText(title, content string) (*ReviewResult, error)
 	return s.callTextLLM(input, textReviewPrompt)
 }
 
-// ReviewImage sends an image file to a vision model for moderation.
-func (s *ReviewService) ReviewImage(imagePath string) (*ReviewResult, error) {
-	data, err := os.ReadFile(imagePath)
+// ReviewImage 审核图片内容（从 io.Reader 读取）
+func (s *ReviewService) ReviewImage(reader io.Reader) (*ReviewResult, error) {
+	data, err := io.ReadAll(reader)
 	if err != nil {
-		return nil, fmt.Errorf("读取图片失败: %w", err)
+		return nil, fmt.Errorf("读取图片数据失败: %w", err)
 	}
 
-	ext := strings.ToLower(filepath.Ext(imagePath))
-	mime := "image/jpeg"
-	switch ext {
-	case ".png":
-		mime = "image/png"
-	case ".webp":
-		mime = "image/webp"
-	case ".gif":
-		mime = "image/gif"
-	}
-
-	b64 := base64.StdEncoding.EncodeToString(data)
-	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, b64)
+	mimeType := http.DetectContentType(data)
+	dataURL := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 
 	return s.callVisionLLM(dataURL, imageReviewPrompt)
 }
@@ -217,22 +211,44 @@ func (s *ReviewService) ExtractFrames(videoPath, outputDir string, numFrames int
 
 // ReviewFrames reviews multiple video frames and returns the worst result.
 func (s *ReviewService) ReviewFrames(framePaths []string) (*ReviewResult, error) {
-	worst := &ReviewResult{Status: "approved", Confidence: 1.0}
-	anySucceeded := false
+	var (
+		worstResult *ReviewResult
+		mu          sync.Mutex
+		wg          sync.WaitGroup
+		sem         = make(chan struct{}, s.cfg.MaxConcurrentFrames)
+	)
+
 	for _, fp := range framePaths {
-		r, err := s.ReviewImage(fp)
-		if err != nil {
-			continue
-		}
-		anySucceeded = true
-		if r.Status == "rejected" && r.Confidence > worst.Confidence {
-			worst = r
-		}
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			f, err := os.Open(path)
+			if err != nil {
+				return
+			}
+			defer f.Close()
+
+			result, err := s.ReviewImage(f)
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			if worstResult == nil || result.Confidence > worstResult.Confidence {
+				worstResult = result
+			}
+			mu.Unlock()
+		}(fp)
 	}
-	if !anySucceeded {
-		return nil, fmt.Errorf("所有视频帧审核均失败 (共%d帧)", len(framePaths))
+	wg.Wait()
+
+	if worstResult == nil {
+		return &ReviewResult{Status: "approved", Confidence: 1.0}, nil
 	}
-	return worst, nil
+	return worstResult, nil
 }
 
 // callTextLLM sends a text moderation request to the LLM.

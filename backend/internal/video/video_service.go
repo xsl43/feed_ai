@@ -143,28 +143,32 @@ func (vs *VideoService) ReviewAndPublishVideo(v *Video) {
 	coverPath := urlToLocalPath(v.CoverURL)
 	coverGray := false
 	if coverPath != "" {
-		imgResult, err := vs.reviewService.ReviewImageWithRetry(coverPath)
-		if err != nil {
-			log.Printf("[Review] 封面审核失败(已重试) videoID=%d: %v", v.ID, err)
-			vs.repo.db.Model(&Video{}).Where("id = ?", v.ID).Updates(map[string]interface{}{
-				"review_status": "manual_review",
-				"review_reason": fmt.Sprintf("封面AI审核失败(已重试%d次): %v", cfg.MaxRetries, err),
-			})
-			return
-		}
-		log.Printf("[Review] 封面审核完成 videoID=%d: status=%s confidence=%.2f", v.ID, imgResult.Status, imgResult.Confidence)
+		f, err := os.Open(coverPath)
+		if err == nil {
+			imgResult, err := vs.reviewService.ReviewImageWithRetry(f)
+			f.Close()
+			if err != nil {
+				log.Printf("[Review] 封面审核失败(已重试) videoID=%d: %v", v.ID, err)
+				vs.repo.db.Model(&Video{}).Where("id = ?", v.ID).Updates(map[string]interface{}{
+					"review_status": "manual_review",
+					"review_reason": fmt.Sprintf("封面AI审核失败(已重试%d次): %v", cfg.MaxRetries, err),
+				})
+				return
+			}
+			log.Printf("[Review] 封面审核完成 videoID=%d: status=%s confidence=%.2f", v.ID, imgResult.Status, imgResult.Confidence)
 
-		imgStatus := vs.reviewService.Classify(imgResult)
-		if imgStatus == "rejected" {
-			vs.applyReviewResult(v.ID, "rejected", imgResult)
-			return
-		}
-		if imgStatus == "manual_review" {
-			vs.applyReviewResult(v.ID, "manual_review", imgResult)
-			return
-		}
-		if imgResult.Confidence < cfg.ConfidenceThreshold {
-			coverGray = true
+			imgStatus := vs.reviewService.Classify(imgResult)
+			if imgStatus == "rejected" {
+				vs.applyReviewResult(v.ID, "rejected", imgResult)
+				return
+			}
+			if imgStatus == "manual_review" {
+				vs.applyReviewResult(v.ID, "manual_review", imgResult)
+				return
+			}
+			if imgResult.Confidence < cfg.ConfidenceThreshold {
+				coverGray = true
+			}
 		}
 	}
 
