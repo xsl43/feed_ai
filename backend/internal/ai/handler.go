@@ -102,6 +102,21 @@ func (h *AIHandler) TriggerAnalysis(c *gin.Context) {
 				}()
 			}
 
+			// 音频审核：ASR转录文本送审
+			if h.reviewService != nil && h.reviewService.IsEnabled() {
+				go func() {
+					reviewResult, err := h.reviewService.ReviewText(result.Transcript, "")
+					if err != nil {
+						log.Printf("[音频审核] media_id=%d 审核失败: %v", media.ID, err)
+						return
+					}
+					status := h.reviewService.Classify(reviewResult)
+					if status == "rejected" && reviewResult.Confidence >= h.reviewService.GetConfig().ConfidenceThreshold {
+						log.Printf("[音频审核] media_id=%d 音频违规: %s (confidence=%.2f)", media.ID, reviewResult.Reason, reviewResult.Confidence)
+					}
+				}()
+			}
+
 			// Clear Redis cache
 			if h.redis != nil {
 				userIDStr := "anon"
