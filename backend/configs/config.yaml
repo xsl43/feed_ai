@@ -47,10 +47,18 @@ review:
   text_model: "deepseek-ai/DeepSeek-V3"
   vision_model: "Qwen/Qwen2.5-VL-32B-Instruct"
   sample_frames: 5
-  frame_review_mode: "off"
+  frame_review_mode: "auto"
   confidence_threshold: 0.7
   manual_review_threshold: 0.5
   max_retries: 3
+  max_video_size_mb: 500
+  max_cover_size_mb: 20
+  max_video_duration_sec: 1800
+  min_video_duration_sec: 15
+  enable_audio_review: true
+  enable_ocr_review: true
+  max_concurrent_frames: 3
+  max_concurrent_videos: 10
 
 # MinIO 对象存储
 minio:

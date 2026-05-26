@@ -83,6 +83,14 @@ type ReviewConfig struct {
 	ConfidenceThreshold   float64 `yaml:"confidence_threshold"`
 	ManualReviewThreshold float64 `yaml:"manual_review_threshold"`
 	MaxRetries            int     `yaml:"max_retries"`
+	MaxVideoSizeMB        int     `yaml:"max_video_size_mb"`
+	MaxCoverSizeMB        int     `yaml:"max_cover_size_mb"`
+	MaxVideoDurationSec   int     `yaml:"max_video_duration_sec"`
+	MinVideoDurationSec   int     `yaml:"min_video_duration_sec"`
+	EnableAudioReview     bool    `yaml:"enable_audio_review"`
+	EnableOCRReview       bool    `yaml:"enable_ocr_review"`
+	MaxConcurrentFrames   int     `yaml:"max_concurrent_frames"`
+	MaxConcurrentVideos   int     `yaml:"max_concurrent_videos"`
 }
 
 // MinIO 对象存储配置
@@ -237,10 +245,18 @@ func DefaultLocalConfig() Config {
 			TextModel:             "deepseek-ai/DeepSeek-V3",
 			VisionModel:           "Qwen/Qwen2.5-VL-32B-Instruct",
 			SampleFrames:          5,
-			FrameReviewMode:       "off",
+			FrameReviewMode:       "auto",
 			ConfidenceThreshold:   0.7,
 			ManualReviewThreshold: 0.5,
 			MaxRetries:            3,
+			MaxVideoSizeMB:        500,
+			MaxCoverSizeMB:        20,
+			MaxVideoDurationSec:   1800,
+			MinVideoDurationSec:   15,
+			EnableAudioReview:     true,
+			EnableOCRReview:       true,
+			MaxConcurrentFrames:   3,
+			MaxConcurrentVideos:   10,
 		},
 	}
 	ApplyEnvOverrides(&cfg)

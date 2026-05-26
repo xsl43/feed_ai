@@ -18,6 +18,14 @@ type ReviewConfig struct {
 	MaxRetries            int     // AI失败最大重试次数
 	APIKey                string
 	BaseURL               string
+	MaxVideoSizeMB        int
+	MaxCoverSizeMB        int
+	MaxVideoDurationSec   int
+	MinVideoDurationSec   int
+	EnableAudioReview     bool
+	EnableOCRReview       bool
+	MaxConcurrentFrames   int
+	MaxConcurrentVideos   int
 }
 
 func (c ReviewConfig) FrameReviewEnabled() bool {

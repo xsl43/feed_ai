@@ -77,6 +77,14 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		MaxRetries:            cfg.Review.MaxRetries,
 		APIKey:                cfg.AI.APIKey,
 		BaseURL:               cfg.AI.BaseURL,
+		MaxVideoSizeMB:        cfg.Review.MaxVideoSizeMB,
+		MaxCoverSizeMB:        cfg.Review.MaxCoverSizeMB,
+		MaxVideoDurationSec:   cfg.Review.MaxVideoDurationSec,
+		MinVideoDurationSec:   cfg.Review.MinVideoDurationSec,
+		EnableAudioReview:     cfg.Review.EnableAudioReview,
+		EnableOCRReview:       cfg.Review.EnableOCRReview,
+		MaxConcurrentFrames:   cfg.Review.MaxConcurrentFrames,
+		MaxConcurrentVideos:   cfg.Review.MaxConcurrentVideos,
 	}
 	reviewService := review.NewReviewService(reviewCfg)
 
