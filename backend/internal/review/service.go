@@ -246,7 +246,7 @@ func (s *ReviewService) ReviewFrames(framePaths []string) (*ReviewResult, error)
 	wg.Wait()
 
 	if worstResult == nil {
-		return &ReviewResult{Status: "approved", Confidence: 1.0}, nil
+		return nil, fmt.Errorf("所有视频帧审核均失败 (共%d帧)", len(framePaths))
 	}
 	return worstResult, nil
 }
@@ -323,7 +323,7 @@ func (s *ReviewService) ReviewAllDimensions(title, desc, coverPath, videoPath st
 		close(results)
 	}()
 
-	// Aggregate results
+	// Aggregate results: pick the worst outcome across all dimensions
 	allResults := make(map[string]*ReviewResult)
 	var worst *ReviewResult
 	for r := range results {
@@ -331,16 +331,29 @@ func (s *ReviewService) ReviewAllDimensions(title, desc, coverPath, videoPath st
 			allResults[r.Name] = r.Result
 			if worst == nil {
 				worst = r.Result
-			} else if r.Result.Status == "rejected" && r.Result.Confidence >= s.cfg.ConfidenceThreshold {
+			} else if r.Result.Status == "rejected" && worst.Status != "rejected" {
+				// Any rejection is worse than any approval
 				worst = r.Result
-			} else if r.Result.Confidence < worst.Confidence {
+			} else if r.Result.Status == "rejected" && worst.Status == "rejected" &&
+				r.Result.Confidence > worst.Confidence {
+				// Both rejected: pick the one with higher confidence
+				worst = r.Result
+			} else if r.Result.Status != "rejected" && worst.Status != "rejected" &&
+				r.Result.Confidence < worst.Confidence {
+				// Both non-rejected: lower confidence = more uncertain (gray zone)
 				worst = r.Result
 			}
 		}
 	}
 
 	if worst == nil {
-		worst = &ReviewResult{Status: "approved", Confidence: 1.0}
+		// All dimensions failed — escalate to manual review, do NOT auto-approve
+		worst = &ReviewResult{
+			Status:     "rejected",
+			Confidence: 0.0,
+			Reason:     "所有审核维度均失败，转人工审核",
+			Categories: []string{"系统异常"},
+		}
 	}
 	return worst, allResults
 }

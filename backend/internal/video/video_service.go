@@ -155,6 +155,15 @@ func (vs *VideoService) ReviewAndPublishVideo(v *Video) {
 	// Stage 3: Classify and apply
 	finalStatus := vs.reviewService.Classify(result)
 	vs.applyReviewResult(v.ID, finalStatus, result)
+
+	if finalStatus == "approved" {
+		_ = vs.repo.CreateMsg(context.Background(), &OutboxMsg{
+			VideoID:    v.ID,
+			EventType:  "video_published",
+			CreateTime: time.Now(),
+			Status:     "pending",
+		})
+	}
 }
 
 func (vs *VideoService) applyReviewResult(videoID uint, status string, result *review.ReviewResult) {
@@ -170,6 +179,7 @@ func (vs *VideoService) applyReviewResult(videoID uint, status string, result *r
 		"review_reason":     result.Reason,
 		"review_confidence": result.Confidence,
 		"review_categories": categories,
+		"last_review_time":  time.Now(),
 	})
 }
 
