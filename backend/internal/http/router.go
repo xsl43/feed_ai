@@ -109,6 +109,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		protectedVideoGroup.POST("/uploadVideo", videoHandler.UploadVideo)
 		protectedVideoGroup.POST("/uploadCover", videoHandler.UploadCover)
 		protectedVideoGroup.POST("/publish", videoHandler.PublishVideo)
+		protectedVideoGroup.POST("/delete", videoHandler.DeleteVideo)
 	}
 	// like
 	likeMQ, err := rabbitmq.NewLikeMQ(rmq)
@@ -324,6 +325,12 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		adminReviewGroup.POST("/video/:id/approve", reviewHandler.ApproveVideo)
 		adminReviewGroup.POST("/video/:id/reject", reviewHandler.RejectVideo)
 		adminReviewGroup.GET("/pending", reviewHandler.GetPendingVideos)
+	}
+
+	// 事后复审 Worker (热门/举报/流量突增)
+	if reviewService.IsEnabled() {
+		reviewWorker := worker.NewReviewWorker(db, reviewService)
+		reviewWorker.Start()
 	}
 
 	return r

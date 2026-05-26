@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { mediaAPI, aiAPI, reviewAPI } from '../api'
 import type { AIConfig, AIConfigUpdate, ReviewConfig } from '../api'
@@ -13,7 +13,21 @@ export default function AIPage() {
   const [summarizeText, setSummarizeText] = useState('')
   const [summary, setSummary] = useState('')
   const [summarizing, setSummarizing] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const { user, isLoggedIn } = useAuthStore()
+
+  // 阻止浏览器默认拖拽行为
+  useEffect(() => {
+    const preventDefaults = (e: DragEvent) => { e.preventDefault(); e.stopPropagation() }
+    window.addEventListener('dragover', preventDefaults)
+    window.addEventListener('drop', preventDefaults)
+    return () => {
+      window.removeEventListener('dragover', preventDefaults)
+      window.removeEventListener('drop', preventDefaults)
+    }
+  }, [])
 
   // ──────────── AI 配置面板状态 ────────────
   const [configOpen, setConfigOpen] = useState(false)
@@ -107,6 +121,17 @@ export default function AIPage() {
     }
   }
 
+  const handleDelete = async (mediaId: number) => {
+    if (!confirm('确定要删除这条记录吗？')) return
+    try {
+      await mediaAPI.delete(mediaId, user?.id || 0)
+      toast.success('已删除')
+      setFiles((prev) => prev.filter((f) => f.id !== mediaId))
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || '删除失败')
+    }
+  }
+
   const refreshStatus = async (mediaId: number) => {
     try {
       const { data } = await aiAPI.getStatus(mediaId)
@@ -119,6 +144,39 @@ export default function AIPage() {
         setTimeout(() => refreshStatus(mediaId), 5000)
       }
     } catch {}
+  }
+
+  const handleFileUpload = async (file: File) => {
+    if (file.size > 500 * 1024 * 1024) {
+      toast.error('文件大小不能超过 500MB')
+      return
+    }
+    setUploading(true)
+    try {
+      await mediaAPI.upload(file, user?.id)
+      toast.success('上传成功')
+      const { data } = await mediaAPI.list(user?.id)
+      setFiles(data || [])
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || '上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    handleFileUpload(f)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(false)
+    const f = e.dataTransfer.files?.[0]
+    if (!f) return
+    handleFileUpload(f)
   }
 
   const handleSummarize = async () => {
@@ -323,6 +381,43 @@ export default function AIPage() {
         )}
       </div>
 
+      {/* 上传区域 */}
+      <div className="card mb-4">
+        <h2 className="font-semibold text-weibo-text mb-3">上传视频</h2>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/mp4,video/mov,video/avi,video/mkv,video/webm"
+          onChange={handleFileChange}
+          className="hidden"
+        />
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }}
+          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }}
+          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false) }}
+          onDrop={handleDrop}
+          className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer transition-colors ${
+            dragOver ? 'border-weibo-primary bg-weibo-primary/5' : 'border-weibo-border-strong hover:border-weibo-primary'
+          }`}
+        >
+          {uploading ? (
+            <div className="text-center">
+              <div className="animate-spin w-8 h-8 border-2 border-weibo-primary border-t-transparent rounded-full mx-auto mb-2" />
+              <span className="text-sm text-weibo-text-muted">上传中...</span>
+            </div>
+          ) : (
+            <div className="text-center text-weibo-text-muted">
+              <svg className="w-10 h-10 mx-auto mb-2" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <span className="text-sm">点击或拖拽上传视频</span>
+              <span className="block text-xs text-weibo-text-muted mt-1">支持 MP4、MOV、AVI、MKV、WebM，最大 500MB</span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* 媒体文件列表 */}
       <div className="card mb-4">
         <h2 className="font-semibold text-weibo-text mb-3">我的媒体文件</h2>
@@ -361,6 +456,13 @@ export default function AIPage() {
                   className="ml-3 btn-outline text-xs !px-3 !py-1 shrink-0"
                 >
                   {f.status === 'COMPLETED' ? '重新分析' : f.status === 'PROCESSING' ? '处理中' : 'AI分析'}
+                </button>
+                <button
+                  onClick={() => handleDelete(f.id)}
+                  className="ml-1 text-red-400 hover:text-red-600 text-xs px-2 py-1 shrink-0"
+                  title="删除"
+                >
+                  🗑
                 </button>
               </div>
             ))}

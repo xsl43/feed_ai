@@ -313,9 +313,50 @@ func (s *ReviewService) ReviewAllDimensions(title, desc, coverPath, videoPath st
 		}()
 	}
 
-	// Dimension 4+5: Audio and OCR review (placeholder - return approved)
+	// Dimension 4: Audio review (ASR transcript reviewed in AI handler separately)
 	results <- dimResult{"audio", &ReviewResult{Status: "approved", Confidence: 1.0}}
-	results <- dimResult{"ocr", &ReviewResult{Status: "approved", Confidence: 1.0}}
+
+	// Dimension 5: OCR review — extract text from frames, then review
+	if s.cfg.EnableOCRReview && len(framePaths) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var ocrTexts []string
+			limit := 2
+			if len(framePaths) < limit {
+				limit = len(framePaths)
+			}
+			for _, fp := range framePaths[:limit] {
+				data, err := os.ReadFile(fp)
+				if err != nil {
+					continue
+				}
+				mimeType := http.DetectContentType(data)
+				dataURL := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
+				text, err := s.callOCR(dataURL)
+				if err != nil {
+					log.Printf("[OCR] 提取文字失败 %s: %v", fp, err)
+					continue
+				}
+				if text != "" {
+					ocrTexts = append(ocrTexts, text)
+				}
+			}
+			if len(ocrTexts) == 0 {
+				results <- dimResult{"ocr", &ReviewResult{Status: "approved", Confidence: 1.0}}
+				return
+			}
+			combined := strings.Join(ocrTexts, "\n---\n")
+			r, err := s.ReviewText(combined, "")
+			if err != nil {
+				results <- dimResult{"ocr", nil}
+				return
+			}
+			results <- dimResult{"ocr", r}
+		}()
+	} else {
+		results <- dimResult{"ocr", &ReviewResult{Status: "approved", Confidence: 1.0}}
+	}
 
 	// Close results channel when all goroutines finish
 	go func() {
@@ -411,6 +452,75 @@ func (s *ReviewService) callVisionLLM(imageDataURL, systemPrompt string) (*Revie
 	}
 
 	return s.doLLMCall(url, reqBody)
+}
+
+// callOCR extracts text from an image using the OCR model.
+func (s *ReviewService) callOCR(imageDataURL string) (string, error) {
+	url := s.cfg.BaseURL + "/chat/completions"
+
+	type imageContent struct {
+		Type     string `json:"type"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url,omitempty"`
+		Text string `json:"text,omitempty"`
+	}
+
+	reqBody := map[string]interface{}{
+		"model":       "PaddlePaddle/PaddleOCR-VL-1.5",
+		"stream":      false,
+		"max_tokens":  512,
+		"temperature": 0,
+		"messages": []map[string]interface{}{
+			{
+				"role": "user",
+				"content": []imageContent{
+					{Type: "image_url", ImageURL: struct{ URL string `json:"url"` }{URL: imageDataURL}},
+					{Type: "text", Text: "请提取这张图片中的所有文字，直接输出文字内容，不要加任何解释。"},
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("OCR API请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("OCR API错误 (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("OCR响应解析失败: %w", err)
+	}
+
+	if len(result.Choices) == 0 {
+		return "", fmt.Errorf("OCR返回空结果")
+	}
+
+	return strings.TrimSpace(result.Choices[0].Message.Content), nil
 }
 
 func (s *ReviewService) doLLMCall(url string, reqBody interface{}) (*ReviewResult, error) {

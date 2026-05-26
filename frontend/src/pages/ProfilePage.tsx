@@ -5,6 +5,7 @@ import type { ProfileResponse, Video } from '../types'
 import { FollowButton } from '../components/Buttons'
 import { formatCount } from '../utils/time'
 import { useAuthStore } from '../store/authStore'
+import toast from 'react-hot-toast'
 
 export default function ProfilePage() {
   const { id } = useParams<{ id: string }>()
@@ -14,6 +15,17 @@ export default function ProfilePage() {
   const { user } = useAuthStore()
 
   const isSelf = user?.id === Number(id)
+
+  const handleDelete = async (videoId: number) => {
+    if (!confirm('确定要删除这个视频吗？')) return
+    try {
+      await videoAPI.delete(videoId)
+      toast.success('已删除')
+      setVideos((prev) => prev.filter((v) => v.id !== videoId))
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || '删除失败')
+    }
+  }
 
   useEffect(() => {
     if (!id) return
@@ -69,31 +81,35 @@ export default function ProfilePage() {
           </div>
         ) : (
           videos.map((v) => (
-            <Link
-              key={v.id}
-              to={`/video/${v.id}`}
-              className="group relative rounded-lg overflow-hidden bg-weibo-bg aspect-video"
-            >
-              <img
-                src={v.cover_url}
-                alt={v.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                loading="lazy"
-              />
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                <p className="text-white text-xs line-clamp-1">{v.title}</p>
-              </div>
+            <div key={v.id} className="group relative rounded-lg overflow-hidden bg-weibo-bg aspect-video">
+              <Link to={`/video/${v.id}`}>
+                <img
+                  src={v.cover_url}
+                  alt={v.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  loading="lazy"
+                />
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 flex justify-between items-end">
+                  <p className="text-white text-xs line-clamp-1 flex-1">{v.title}</p>
+                  <span className="text-white text-2xs ml-2 shrink-0">👍 {formatCount(v.likes_count)}</span>
+                </div>
+              </Link>
+              {isSelf && (
+                <button
+                  onClick={(e) => { e.preventDefault(); handleDelete(v.id) }}
+                  className="absolute top-1 left-1 bg-red-500/80 hover:bg-red-600 text-white text-2xs px-1.5 py-0.5 rounded"
+                >
+                  删除
+                </button>
+              )}
               {isSelf && v.review_status && v.review_status !== 'approved' && (
-                <div className={`absolute top-2 left-2 text-2xs px-1.5 py-0.5 rounded ${
+                <div className={`absolute top-1 right-1 text-2xs px-1.5 py-0.5 rounded ${
                   v.review_status === 'pending' ? 'bg-yellow-400 text-yellow-900' : 'bg-red-500 text-white'
                 }`}>
                   {v.review_status === 'pending' ? '审核中' : '未通过'}
                 </div>
               )}
-              <div className="absolute top-2 right-2 bg-black/50 text-white text-2xs px-1.5 py-0.5 rounded">
-                👍 {formatCount(v.likes_count)}
-              </div>
-            </Link>
+            </div>
           ))
         )}
       </div>

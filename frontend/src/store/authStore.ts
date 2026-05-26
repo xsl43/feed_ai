@@ -21,12 +21,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: (token, refreshToken, user) => {
     localStorage.setItem('token', token)
     localStorage.setItem('refresh_token', refreshToken)
+    localStorage.setItem('user', JSON.stringify(user))
     set({ token, refreshToken, user, isLoggedIn: true })
   },
 
   logout: () => {
     localStorage.removeItem('token')
     localStorage.removeItem('refresh_token')
+    localStorage.removeItem('user')
     set({ token: null, refreshToken: null, user: null, isLoggedIn: false })
   },
 
@@ -35,8 +37,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   hydrate: () => {
     const token = localStorage.getItem('token')
     const refreshToken = localStorage.getItem('refresh_token')
-    if (token) {
-      set({ token, refreshToken, isLoggedIn: true })
+    const userStr = localStorage.getItem('user')
+    if (token && userStr) {
+      try {
+        const user = JSON.parse(userStr) as Account
+        set({ token, refreshToken, user, isLoggedIn: true })
+      } catch {
+        set({ token, refreshToken, isLoggedIn: true })
+      }
     }
   },
 }))

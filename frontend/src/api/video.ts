@@ -20,4 +20,5 @@ export const videoAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  delete: (id: number) => api.post<{ message: string }>('/video/delete', { id }),
 }

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { videoAPI, reviewAPI } from '../api'
 import type { ReviewStatus } from '../api/review'
@@ -16,16 +16,42 @@ export default function PublishPage() {
   const [publishing, setPublishing] = useState(false)
   const [publishResult, setPublishResult] = useState<{ id: number; review_status: string } | null>(null)
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus | null>(null)
+  const [dragOver, setDragOver] = useState<'video' | 'cover' | null>(null)
   const { isLoggedIn } = useAuthStore()
   const navigate = useNavigate()
   const videoInputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
 
+  // 阻止整个页面默认的拖拽行为（浏览器打开文件）
+  useEffect(() => {
+    const preventDefaults = (e: DragEvent) => { e.preventDefault(); e.stopPropagation() }
+    window.addEventListener('dragover', preventDefaults)
+    window.addEventListener('drop', preventDefaults)
+    return () => {
+      window.removeEventListener('dragover', preventDefaults)
+      window.removeEventListener('drop', preventDefaults)
+    }
+  }, [])
+
   const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
     if (f.size > 500 * 1024 * 1024) {
-      toast.error('视频文件大小不能超过 500MB')
+      toast.error('视频大小不能超过 500MB')
+      return
+    }
+    setVideoFile(f)
+    setVideoPreview(URL.createObjectURL(f))
+  }
+
+  const handleVideoDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(null)
+    const f = e.dataTransfer.files?.[0]
+    if (!f) return
+    if (f.size > 500 * 1024 * 1024) {
+      toast.error('视频大小不能超过 500MB')
       return
     }
     setVideoFile(f)
@@ -36,7 +62,21 @@ export default function PublishPage() {
     const f = e.target.files?.[0]
     if (!f) return
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) {
-      toast.error('封面仅支持 JPG/PNG/WebP 格式')
+      toast.error('封面仅支持 JPG/PNG/WebP')
+      return
+    }
+    setCoverFile(f)
+    setCoverPreview(URL.createObjectURL(f))
+  }
+
+  const handleCoverDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(null)
+    const f = e.dataTransfer.files?.[0]
+    if (!f) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) {
+      toast.error('封面仅支持 JPG/PNG/WebP')
       return
     }
     setCoverFile(f)
@@ -155,7 +195,12 @@ export default function PublishPage() {
             />
             <div
               onClick={() => videoInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver('video') }}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver('video') }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(null) }}
+              onDrop={handleVideoDrop}
               className={`border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors aspect-video ${
+                dragOver === 'video' ? 'border-weibo-primary bg-weibo-primary/5' :
                 videoPreview ? 'border-weibo-primary' : 'border-weibo-border-strong hover:border-weibo-primary'
               }`}
             >
@@ -166,7 +211,7 @@ export default function PublishPage() {
                   <svg className="w-8 h-8 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                     <path d="M12 5v14M5 12h14" />
                   </svg>
-                  <span className="text-xs">点击上传 MP4</span>
+                  <span className="text-xs">点击或拖拽上传视频</span>
                 </div>
               )}
             </div>
@@ -185,7 +230,12 @@ export default function PublishPage() {
             />
             <div
               onClick={() => coverInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver('cover') }}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver('cover') }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(null) }}
+              onDrop={handleCoverDrop}
               className={`border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors aspect-video ${
+                dragOver === 'cover' ? 'border-weibo-primary bg-weibo-primary/5' :
                 coverPreview ? 'border-weibo-primary' : 'border-weibo-border-strong hover:border-weibo-primary'
               }`}
             >
@@ -196,7 +246,7 @@ export default function PublishPage() {
                   <svg className="w-8 h-8 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                     <path d="M12 5v14M5 12h14" />
                   </svg>
-                  <span className="text-xs">点击上传封面</span>
+                  <span className="text-xs">点击或拖拽上传封面</span>
                 </div>
               )}
             </div>
