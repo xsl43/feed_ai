@@ -23,7 +23,10 @@ func NewReviewHandler(db *gorm.DB, service *review.ReviewService, videoService *
 // GetPendingVideos GET /review/pending - 管理员获取待审核视频列表
 func (h *ReviewHandler) GetPendingVideos(c *gin.Context) {
 	var videos []video.Video
-	h.db.Where("review_status = ?", "manual_review").Order("create_time desc").Limit(100).Find(&videos)
+	h.db.Where("review_status = ?", "manual_review").
+		Order("review_priority DESC, create_time ASC").
+		Limit(100).
+		Find(&videos)
 	if videos == nil {
 		videos = []video.Video{}
 	}
