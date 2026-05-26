@@ -20,7 +20,7 @@ type Video struct {
 	RetryCount       int     `gorm:"default:0" json:"retry_count,omitempty"`
 	PlayCount        int64     `gorm:"column:play_count;not null;default:0" json:"play_count"`
 	ReportCount      int       `gorm:"column:report_count;not null;default:0" json:"report_count"`
-	LastReviewTime   time.Time `gorm:"column:last_review_time" json:"last_review_time,omitempty"`
+	LastReviewTime   *time.Time `gorm:"column:last_review_time" json:"last_review_time,omitempty"`
 	ReviewPriority   int       `gorm:"column:review_priority;default:0" json:"review_priority,omitempty"`
 }
 
