@@ -43,17 +43,22 @@ const imageReviewPrompt = `# Role
 {"status":"approved或rejected","confidence":0.95,"reason":"审核理由","categories":["色情","暴力"]}`
 
 type ReviewService struct {
-	cfg    ReviewConfig
-	client *http.Client
+	cfg       ReviewConfig
+	client    *http.Client
+	dfaFilter *DFAFilter
 }
 
 func NewReviewService(cfg ReviewConfig) *ReviewService {
-	return &ReviewService{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+	svc := &ReviewService{
+		cfg:    cfg,
+		client: &http.Client{Timeout: 60 * time.Second},
 	}
+	// DFA敏感词过滤器（文件不存在不阻塞启动）
+	filter, err := NewDFAFilter("configs/sensitive_words.txt")
+	if err == nil {
+		svc.dfaFilter = filter
+	}
+	return svc
 }
 
 func (s *ReviewService) IsEnabled() bool {
@@ -66,6 +71,14 @@ func (s *ReviewService) UpdateConfig(cfg ReviewConfig) {
 
 func (s *ReviewService) GetConfig() ReviewConfig {
 	return s.cfg
+}
+
+// SensitiveWordCheck 敏感词检测，返回命中的词列表
+func (s *ReviewService) SensitiveWordCheck(text string) []string {
+	if s.dfaFilter == nil {
+		return nil
+	}
+	return s.dfaFilter.Check(text)
 }
 
 // Classify applies the confidence decision matrix to an AI review result.
