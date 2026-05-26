@@ -89,24 +89,5 @@ func (f *DFAFilter) Check(text string) []string {
 
 // Contains 检测文本是否包含任何敏感词
 func (f *DFAFilter) Contains(text string) bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
-	text = strings.ToLower(text)
-	runes := []rune(text)
-
-	for i := 0; i < len(runes); i++ {
-		node := f.root
-		for j := i; j < len(runes); j++ {
-			ch := runes[j]
-			if node.children[ch] == nil {
-				break
-			}
-			node = node.children[ch]
-			if node.isEnd {
-				return true
-			}
-		}
-	}
-	return false
+	return len(f.Check(text)) > 0
 }

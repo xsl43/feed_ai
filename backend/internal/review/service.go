@@ -57,6 +57,8 @@ func NewReviewService(cfg ReviewConfig) *ReviewService {
 	filter, err := NewDFAFilter("configs/sensitive_words.txt")
 	if err == nil {
 		svc.dfaFilter = filter
+	} else {
+		log.Printf("[Review] DFA敏感词库加载失败: %v", err)
 	}
 	return svc
 }
