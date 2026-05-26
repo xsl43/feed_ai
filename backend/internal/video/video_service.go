@@ -36,6 +36,17 @@ func (vs *VideoService) SetReviewService(rs *review.ReviewService) {
 	vs.reviewService = rs
 }
 
+// GetReviewConfig returns the review config (for handlers to read size limits, etc.)
+func (vs *VideoService) GetReviewConfig() review.ReviewConfig {
+	if vs.reviewService == nil {
+		return review.ReviewConfig{
+			MaxVideoSizeMB: 500,
+			MaxCoverSizeMB: 20,
+		}
+	}
+	return vs.reviewService.GetConfig()
+}
+
 func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 	if video == nil {
 		return errors.New("video is nil")
