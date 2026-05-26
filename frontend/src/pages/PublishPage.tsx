@@ -24,8 +24,8 @@ export default function PublishPage() {
   const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
-    if (f.size > 200 * 1024 * 1024) {
-      toast.error('视频不能超过200MB')
+    if (f.size > 500 * 1024 * 1024) {
+      toast.error('视频文件大小不能超过 500MB')
       return
     }
     setVideoFile(f)
@@ -149,7 +149,7 @@ export default function PublishPage() {
             <input
               ref={videoInputRef}
               type="file"
-              accept="video/mp4"
+              accept="video/mp4,video/mov,video/avi,video/mkv,video/webm"
               onChange={handleVideoChange}
               className="hidden"
             />
