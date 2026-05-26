@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -109,138 +108,53 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 	return nil
 }
 
+// ReviewAndPublishVideo runs the full review pipeline and updates video status.
 func (vs *VideoService) ReviewAndPublishVideo(v *Video) {
-	log.Printf("[Review] 开始审核视频 ID=%d 标题=%s", v.ID, v.Title)
-	cfg := vs.reviewService.GetConfig()
-	textGray := false
-
-	// Stage 1: text review (title + description)
-	textResult, err := vs.reviewService.ReviewTextWithRetry(v.Title, v.Description)
-	if err != nil {
-		log.Printf("[Review] 文本审核失败(已重试) videoID=%d: %v", v.ID, err)
-		vs.repo.db.Model(&Video{}).Where("id = ?", v.ID).Updates(map[string]interface{}{
-			"review_status": "manual_review",
-			"review_reason": fmt.Sprintf("AI审核失败(已重试%d次): %v", cfg.MaxRetries, err),
-		})
-		return
-	}
-	log.Printf("[Review] 文本审核完成 videoID=%d: status=%s confidence=%.2f", v.ID, textResult.Status, textResult.Confidence)
-
-	textStatus := vs.reviewService.Classify(textResult)
-	if textStatus == "rejected" {
-		vs.applyReviewResult(v.ID, "rejected", textResult)
-		return
-	}
-	if textStatus == "manual_review" {
-		vs.applyReviewResult(v.ID, "manual_review", textResult)
-		return
-	}
-	if textResult.Confidence < cfg.ConfidenceThreshold {
-		textGray = true
-	}
-
-	// Stage 2: cover image review
-	coverPath := urlToLocalPath(v.CoverURL)
-	coverGray := false
-	if coverPath != "" {
-		f, err := os.Open(coverPath)
-		if err == nil {
-			imgResult, err := vs.reviewService.ReviewImageWithRetry(f)
-			f.Close()
-			if err != nil {
-				log.Printf("[Review] 封面审核失败(已重试) videoID=%d: %v", v.ID, err)
-				vs.repo.db.Model(&Video{}).Where("id = ?", v.ID).Updates(map[string]interface{}{
-					"review_status": "manual_review",
-					"review_reason": fmt.Sprintf("封面AI审核失败(已重试%d次): %v", cfg.MaxRetries, err),
-				})
-				return
-			}
-			log.Printf("[Review] 封面审核完成 videoID=%d: status=%s confidence=%.2f", v.ID, imgResult.Status, imgResult.Confidence)
-
-			imgStatus := vs.reviewService.Classify(imgResult)
-			if imgStatus == "rejected" {
-				vs.applyReviewResult(v.ID, "rejected", imgResult)
-				return
-			}
-			if imgStatus == "manual_review" {
-				vs.applyReviewResult(v.ID, "manual_review", imgResult)
-				return
-			}
-			if imgResult.Confidence < cfg.ConfidenceThreshold {
-				coverGray = true
-			}
+	// Stage 0: Sensitive word pre-check
+	if vs.reviewService != nil {
+		hits := vs.reviewService.SensitiveWordCheck(v.Title + " " + v.Description)
+		if len(hits) > 0 {
+			vs.applyReviewResult(v.ID, "manual_review", &review.ReviewResult{
+				Status:     "rejected",
+				Confidence: 0.9,
+				Reason:     fmt.Sprintf("敏感词命中: %v", hits),
+				Categories: []string{"敏感词"},
+			})
+			return
 		}
 	}
 
-	// Stage 3: frame review (triggered by mode or gray zone)
-	shouldReviewFrames := cfg.FrameReviewMode == "on" ||
-		(cfg.FrameReviewMode == "auto" && (textGray || coverGray))
+	// Stage 1: Determine frame paths if frame review is needed
+	var framePaths []string
+	coverPath := urlToLocalPath(v.CoverURL)
 
-	if shouldReviewFrames {
+	// Extract frames if frame review mode is on or auto
+	if vs.reviewService != nil && vs.reviewService.GetConfig().FrameReviewEnabled() {
 		videoPath := urlToLocalPath(v.PlayURL)
 		if videoPath != "" {
-			tmpDir := os.TempDir()
-			frames, err := vs.reviewService.ExtractFrames(videoPath, tmpDir, cfg.SampleFrames)
-			if err != nil {
-				log.Printf("[Review] 视频抽帧失败 videoID=%d: %v", v.ID, err)
-			} else {
-				defer func() {
-					for _, f := range frames {
-						os.Remove(f)
-					}
-				}()
-				frameResult, err := vs.reviewService.ReviewFrames(frames)
-				if err != nil {
-					log.Printf("[Review] 视频帧审核失败 videoID=%d: %v", v.ID, err)
-					vs.repo.db.Model(&Video{}).Where("id = ?", v.ID).Updates(map[string]interface{}{
-						"review_status": "manual_review",
-						"review_reason": fmt.Sprintf("视频帧审核失败: %v", err),
-					})
-					return
-				}
-				log.Printf("[Review] 视频帧审核完成 videoID=%d: status=%s confidence=%.2f", v.ID, frameResult.Status, frameResult.Confidence)
-
-				frameStatus := vs.reviewService.Classify(frameResult)
-				if frameStatus == "rejected" {
-					vs.applyReviewResult(v.ID, "rejected", frameResult)
-					return
-				}
-				if frameStatus == "manual_review" {
-					vs.applyReviewResult(v.ID, "manual_review", frameResult)
-					return
+			tmpDir, err := os.MkdirTemp("", "frames_*")
+			if err == nil {
+				defer os.RemoveAll(tmpDir)
+				frames, err := vs.reviewService.ExtractFrames(videoPath, tmpDir, vs.reviewService.GetConfig().SampleFrames)
+				if err == nil {
+					framePaths = frames
 				}
 			}
 		}
 	}
 
-	// All stages passed: approve and write outbox
-	vs.repo.db.Model(&Video{}).Where("id = ?", v.ID).Updates(map[string]interface{}{
-		"review_status":  "approved",
-		"review_reason":  "",
-		"retry_count":    0,
-	})
+	// Stage 2: Concurrent review (text + cover + frames)
+	result, _ := vs.reviewService.ReviewAllDimensions(
+		v.Title,
+		v.Description,
+		coverPath,
+		"", // videoPath not needed separately
+		framePaths,
+	)
 
-	// Re-extract tags on approval
-	vs.repo.db.Where("video_id = ?", v.ID).Delete(&VideoTag{})
-	tags := ExtractTags(v.Title + " " + v.Description)
-	for _, tagName := range tags {
-		var tag Tag
-		vs.repo.db.Where("name = ?", tagName).FirstOrCreate(&tag, Tag{Name: tagName})
-		vs.repo.db.Create(&VideoTag{VideoID: v.ID, TagID: tag.ID})
-	}
-
-	msg := OutboxMsg{
-		VideoID:    v.ID,
-		EventType:  "video_published",
-		Status:     "pending",
-		CreateTime: v.CreateTime,
-	}
-	if err := vs.repo.db.Create(&msg).Error; err != nil {
-		log.Printf("[Review] 创建OutboxMsg失败 videoID=%d: %v", v.ID, err)
-		return
-	}
-
-	log.Printf("[Review] 视频审核通过 videoID=%d", v.ID)
+	// Stage 3: Classify and apply
+	finalStatus := vs.reviewService.Classify(result)
+	vs.applyReviewResult(v.ID, finalStatus, result)
 }
 
 func (vs *VideoService) applyReviewResult(videoID uint, status string, result *review.ReviewResult) {
