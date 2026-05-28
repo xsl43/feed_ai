@@ -4,6 +4,7 @@ export interface Account {
   username: string
   avatar_url?: string
   bio?: string
+  is_admin?: boolean
 }
 
 export interface LoginRequest {
@@ -16,6 +17,7 @@ export interface LoginResponse {
   refresh_token: string
   account_id: number
   username: string
+  is_admin: boolean
 }
 
 export interface RegisterRequest {

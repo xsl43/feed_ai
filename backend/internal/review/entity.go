@@ -26,6 +26,10 @@ type ReviewConfig struct {
 	EnableOCRReview       bool
 	MaxConcurrentFrames   int
 	MaxConcurrentVideos   int
+	// Agent 配置
+	AgentEnabled    bool
+	AgentMaxRounds  int
+	AgentTimeoutSec int
 }
 
 func (c ReviewConfig) FrameReviewEnabled() bool {

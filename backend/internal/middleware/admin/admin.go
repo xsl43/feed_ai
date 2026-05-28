@@ -17,6 +17,11 @@ func SetAdminIDs(ids []uint) {
 	}
 }
 
+// IsAdmin checks whether the given account ID is an admin.
+func IsAdmin(accountID uint) bool {
+	return adminIDs[accountID]
+}
+
 // RequireAdmin is a Gin middleware that checks if the authenticated user is an admin.
 func RequireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {

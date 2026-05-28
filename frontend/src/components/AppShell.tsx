@@ -30,6 +30,7 @@ export default function AppShell() {
               <>
                 <NavLink to="/publish" label="发布" />
                 <NavLink to="/messages" label="消息" />
+                {user?.is_admin && <NavLink to="/admin/review" label="审核管理" />}
                 <Link
                   to={`/profile/${user?.id || 1}`}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-weibo-bg transition-colors text-sm"

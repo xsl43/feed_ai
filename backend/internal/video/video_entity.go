@@ -22,6 +22,12 @@ type Video struct {
 	ReportCount      int       `gorm:"column:report_count;not null;default:0" json:"report_count"`
 	LastReviewTime   *time.Time `gorm:"column:last_review_time" json:"last_review_time,omitempty"`
 	ReviewPriority   int       `gorm:"column:review_priority;default:0" json:"review_priority,omitempty"`
+	// Agent 审核追踪
+	AgentTrace   string `gorm:"column:agent_trace;type:json" json:"agent_trace,omitempty"`
+	AgentRounds  int    `gorm:"column:agent_rounds;default:0" json:"agent_rounds,omitempty"`
+	AgentVerdict string `gorm:"column:agent_verdict;type:varchar(30)" json:"agent_verdict,omitempty"`
+	Phase0Result string `gorm:"column:phase0_result;type:json" json:"phase0_result,omitempty"`
+	Phase1Result string `gorm:"column:phase1_result;type:json" json:"phase1_result,omitempty"`
 }
 
 type PublishVideoRequest struct {

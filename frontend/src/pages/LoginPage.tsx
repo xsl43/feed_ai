@@ -27,7 +27,7 @@ export default function LoginPage() {
         setPassword('')
       } else {
         const { data } = await accountAPI.login({ username: username.trim(), password })
-        login(data.token, data.refresh_token, { id: data.account_id, username: data.username })
+        login(data.token, data.refresh_token, { id: data.account_id, username: data.username, is_admin: data.is_admin })
         toast.success(`欢迎回来，${data.username}!`)
         navigate('/')
       }

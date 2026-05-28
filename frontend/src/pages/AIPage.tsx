@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
+
 import { mediaAPI, aiAPI, reviewAPI } from '../api'
 import type { AIConfig, AIConfigUpdate, ReviewConfig } from '../api'
 import type { MediaFile } from '../types'
@@ -374,9 +374,6 @@ export default function AIPage() {
                 {reviewCfg.frame_review_mode === 'off' ? '关闭' : reviewCfg.frame_review_mode === 'on' ? '开启' : '自动'}
               </span>
             </div>
-            <Link to="/admin/review" className="block text-xs text-weibo-link hover:text-weibo-primary mt-2">
-              管理审核配置 &rarr;
-            </Link>
           </div>
         )}
       </div>

@@ -55,6 +55,7 @@ type LoginResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	AccountID    uint   `json:"account_id"`
 	Username     string `json:"username"`
+	IsAdmin      bool   `json:"is_admin"`
 }
 
 type UpdateProfileRequest struct {

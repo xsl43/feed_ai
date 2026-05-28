@@ -14,17 +14,19 @@ import (
 	"feedsystem_ai_go/internal/middleware/rabbitmq"
 	rediscache "feedsystem_ai_go/internal/middleware/redis"
 	"feedsystem_ai_go/internal/review"
+	"feedsystem_ai_go/internal/review/agent"
 	"feedsystem_ai_go/internal/apierror"
 
 	"gorm.io/gorm"
 )
 
 type VideoService struct {
-	repo          *VideoRepository
-	cache         *rediscache.Client
-	cacheTTL      time.Duration
-	popularityMQ  *rabbitmq.PopularityMQ
-	reviewService *review.ReviewService
+	repo            *VideoRepository
+	cache           *rediscache.Client
+	cacheTTL        time.Duration
+	popularityMQ    *rabbitmq.PopularityMQ
+	reviewService   *review.ReviewService
+	publishingAgent *agent.PublishingAgent
 }
 
 func NewVideoService(repo *VideoRepository, cache *rediscache.Client, popularityMQ *rabbitmq.PopularityMQ) *VideoService {
@@ -33,6 +35,10 @@ func NewVideoService(repo *VideoRepository, cache *rediscache.Client, popularity
 
 func (vs *VideoService) SetReviewService(rs *review.ReviewService) {
 	vs.reviewService = rs
+}
+
+func (vs *VideoService) SetPublishingAgent(pa *agent.PublishingAgent) {
+	vs.publishingAgent = pa
 }
 
 // GetReviewConfig returns the review config (for handlers to read size limits, etc.)
@@ -111,13 +117,14 @@ func (vs *VideoService) Publish(ctx context.Context, video *Video) error {
 // ReviewAndPublishVideo runs the full review pipeline and updates video status.
 func (vs *VideoService) ReviewAndPublishVideo(v *Video) {
 	// Stage 0: Sensitive word pre-check
+	var sensitiveHits []string
 	if vs.reviewService != nil {
-		hits := vs.reviewService.SensitiveWordCheck(v.Title + " " + v.Description)
-		if len(hits) > 0 {
+		sensitiveHits = vs.reviewService.SensitiveWordCheck(v.Title + " " + v.Description)
+		if len(sensitiveHits) > 0 {
 			vs.applyReviewResult(v.ID, "manual_review", &review.ReviewResult{
 				Status:     "rejected",
 				Confidence: 0.9,
-				Reason:     fmt.Sprintf("敏感词命中: %v", hits),
+				Reason:     fmt.Sprintf("敏感词命中: %v", sensitiveHits),
 				Categories: []string{"敏感词"},
 			})
 			return
@@ -127,10 +134,9 @@ func (vs *VideoService) ReviewAndPublishVideo(v *Video) {
 	// Stage 1: Determine frame paths if frame review is needed
 	var framePaths []string
 	coverPath := urlToLocalPath(v.CoverURL)
+	videoPath := urlToLocalPath(v.PlayURL)
 
-	// Extract frames if frame review mode is on or auto
 	if vs.reviewService != nil && vs.reviewService.GetConfig().FrameReviewEnabled() {
-		videoPath := urlToLocalPath(v.PlayURL)
 		if videoPath != "" {
 			tmpDir, err := os.MkdirTemp("", "frames_*")
 			if err == nil {
@@ -144,17 +150,49 @@ func (vs *VideoService) ReviewAndPublishVideo(v *Video) {
 	}
 
 	// Stage 2: Concurrent review (text + cover + frames)
-	result, _ := vs.reviewService.ReviewAllDimensions(
-		v.Title,
-		v.Description,
-		coverPath,
-		"", // videoPath not needed separately
-		framePaths,
+	result, allResults := vs.reviewService.ReviewAllDimensions(
+		v.Title, v.Description, coverPath, "", framePaths,
 	)
+
+	// Phase 0 result
+	phase0Result := map[string]interface{}{
+		"sensitive_word_hits": sensitiveHits,
+		"passed":              len(sensitiveHits) == 0,
+	}
+
+	// Stage 2b: Agent ReAct (Phase 2)
+	var agentTrace *agent.AgentTrace
+	cfg := vs.reviewService.GetConfig()
+	if vs.publishingAgent != nil && cfg.AgentEnabled {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.AgentTimeoutSec)*time.Second)
+		defer cancel()
+
+		trace, err := vs.publishingAgent.Run(ctx,
+			v.Title, v.Description, sensitiveHits, result, allResults,
+			videoPath, coverPath, framePaths,
+		)
+		if err != nil {
+			fmt.Printf("[PublishingAgent] Agent执行失败，回退到Classify: %v\n", err)
+		} else {
+			agentTrace = trace
+			// Agent may override the Phase 1 result
+			if trace.FinalVerdict == "approved" || trace.FinalVerdict == "rejected" || trace.FinalVerdict == "manual_review" {
+				result = &review.ReviewResult{
+					Status:     trace.FinalVerdict,
+					Confidence: 0.8,
+					Reason:     trace.FinalReason,
+				}
+			}
+		}
+	}
 
 	// Stage 3: Classify and apply
 	finalStatus := vs.reviewService.Classify(result)
-	vs.applyReviewResult(v.ID, finalStatus, result)
+	phase1Result := make(map[string]interface{})
+	for k, r := range allResults {
+		phase1Result[k] = r
+	}
+	vs.applyReviewResultWithAgent(v.ID, finalStatus, result, agentTrace, phase0Result, phase1Result)
 
 	if finalStatus == "approved" {
 		_ = vs.repo.CreateMsg(context.Background(), &OutboxMsg{
@@ -167,20 +205,45 @@ func (vs *VideoService) ReviewAndPublishVideo(v *Video) {
 }
 
 func (vs *VideoService) applyReviewResult(videoID uint, status string, result *review.ReviewResult) {
+	vs.applyReviewResultWithAgent(videoID, status, result, nil, nil, nil)
+}
+
+func (vs *VideoService) applyReviewResultWithAgent(videoID uint, status string, result *review.ReviewResult, trace *agent.AgentTrace, phase0, phase1 map[string]interface{}) {
 	categories := ""
-	if len(result.Categories) > 0 {
+	if result != nil && len(result.Categories) > 0 {
 		categories = result.Categories[0]
 		for i := 1; i < len(result.Categories); i++ {
 			categories += "," + result.Categories[i]
 		}
 	}
-	vs.repo.db.Model(&Video{}).Where("id = ?", videoID).Updates(map[string]interface{}{
+
+	updates := map[string]interface{}{
 		"review_status":     status,
-		"review_reason":     result.Reason,
-		"review_confidence": result.Confidence,
+		"review_reason":     "",
+		"review_confidence": 0.0,
 		"review_categories": categories,
 		"last_review_time":  time.Now(),
-	})
+	}
+	if result != nil {
+		updates["review_reason"] = result.Reason
+		updates["review_confidence"] = result.Confidence
+	}
+
+	if trace != nil {
+		updates["agent_trace"] = trace.ToJSON()
+		updates["agent_rounds"] = len(trace.Rounds)
+		updates["agent_verdict"] = trace.FinalVerdict
+	}
+	if phase0 != nil {
+		b, _ := json.Marshal(phase0)
+		updates["phase0_result"] = string(b)
+	}
+	if phase1 != nil {
+		b, _ := json.Marshal(phase1)
+		updates["phase1_result"] = string(b)
+	}
+
+	vs.repo.db.Model(&Video{}).Where("id = ?", videoID).Updates(updates)
 }
 
 func urlToLocalPath(url string) string {

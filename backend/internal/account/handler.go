@@ -20,10 +20,19 @@ import (
 
 type AccountHandler struct {
 	accountService *AccountService
+	adminIDs       map[uint]bool
 }
 
-func NewAccountHandler(accountService *AccountService) *AccountHandler {
-	return &AccountHandler{accountService: accountService}
+func NewAccountHandler(accountService *AccountService, adminIDs []uint) *AccountHandler {
+	m := make(map[uint]bool)
+	for _, id := range adminIDs {
+		m[id] = true
+	}
+	return &AccountHandler{accountService: accountService, adminIDs: m}
+}
+
+func (h *AccountHandler) isAdmin(accountID uint) bool {
+	return h.adminIDs[accountID]
 }
 func (h *AccountHandler) CreateAccount(c *gin.Context) {
 	var req CreateAccountRequest
@@ -129,7 +138,7 @@ func (h *AccountHandler) Login(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, LoginResponse{Token: accessToken, RefreshToken: refreshToken, AccountID: account.ID, Username: account.Username})
+	c.JSON(200, LoginResponse{Token: accessToken, RefreshToken: refreshToken, AccountID: account.ID, Username: account.Username, IsAdmin: h.isAdmin(account.ID)})
 }
 
 func (h *AccountHandler) Logout(c *gin.Context) {
@@ -222,7 +231,7 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
 		return
 	}
-	c.JSON(http.StatusOK, LoginResponse{Token: newToken, AccountID: accountID, Username: username})
+	c.JSON(http.StatusOK, LoginResponse{Token: newToken, AccountID: accountID, Username: username, IsAdmin: h.isAdmin(accountID)})
 }
 
 func randHex(n int) (string, error) {

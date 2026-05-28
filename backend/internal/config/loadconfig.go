@@ -91,6 +91,10 @@ type ReviewConfig struct {
 	EnableOCRReview       bool    `yaml:"enable_ocr_review"`
 	MaxConcurrentFrames   int     `yaml:"max_concurrent_frames"`
 	MaxConcurrentVideos   int     `yaml:"max_concurrent_videos"`
+	// Agent 配置
+	AgentEnabled    bool `yaml:"agent_enabled"`
+	AgentMaxRounds  int  `yaml:"agent_max_rounds"`
+	AgentTimeoutSec int  `yaml:"agent_timeout_sec"`
 }
 
 // MinIO 对象存储配置
@@ -257,6 +261,9 @@ func DefaultLocalConfig() Config {
 			EnableOCRReview:       true,
 			MaxConcurrentFrames:   3,
 			MaxConcurrentVideos:   10,
+			AgentEnabled:          true,
+			AgentMaxRounds:        5,
+			AgentTimeoutSec:       120,
 		},
 	}
 	ApplyEnvOverrides(&cfg)

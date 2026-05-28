@@ -75,6 +75,10 @@ review:
   enable_ocr_review: true
   max_concurrent_frames: 3
   max_concurrent_videos: 10
+  # Agent ReAct 审核
+  agent_enabled: true
+  agent_max_rounds: 5
+  agent_timeout_sec: 120
 
 # MinIO 对象存储
 minio:

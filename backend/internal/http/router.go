@@ -21,6 +21,7 @@ import (
 	"feedsystem_ai_go/internal/media"
 	mediastorage "feedsystem_ai_go/internal/media/storage"
 	"feedsystem_ai_go/internal/review"
+	"feedsystem_ai_go/internal/review/agent"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -47,7 +48,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 	// account
 	accountRepository := account.NewAccountRepository(db)
 	accountService := account.NewAccountService(accountRepository, cache)
-	accountHandler := account.NewAccountHandler(accountService)
+	accountHandler := account.NewAccountHandler(accountService, cfg.Server.AdminIDs)
 	accountGroup := r.Group("/account")
 	{
 		accountGroup.POST("/register", registerLimiter, accountHandler.CreateAccount)
@@ -85,6 +86,9 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		EnableOCRReview:       cfg.Review.EnableOCRReview,
 		MaxConcurrentFrames:   cfg.Review.MaxConcurrentFrames,
 		MaxConcurrentVideos:   cfg.Review.MaxConcurrentVideos,
+		AgentEnabled:          cfg.Review.AgentEnabled,
+		AgentMaxRounds:        cfg.Review.AgentMaxRounds,
+		AgentTimeoutSec:       cfg.Review.AgentTimeoutSec,
 	}
 	reviewService := review.NewReviewService(reviewCfg)
 
@@ -276,6 +280,25 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 	aiService := appai.NewAIService(cfg.AI, cfg.Media)
 	aiHandler := appai.NewAIHandler(db, aiService, rdb)
 	aiHandler.SetReviewService(reviewService)
+
+	// Publishing Agent (发布审核 Agent)
+	if reviewService.IsEnabled() && reviewCfg.AgentEnabled {
+		engineCfg := agent.EngineConfig{
+			Model:     reviewCfg.TextModel,
+			BaseURL:   reviewCfg.BaseURL,
+			APIKey:    reviewCfg.APIKey,
+			MaxRounds: reviewCfg.AgentMaxRounds,
+			Timeout:   time.Duration(reviewCfg.AgentTimeoutSec) * time.Second,
+		}
+		deps := agent.ToolboxDeps{
+			ReviewService: reviewService,
+			AIService:     aiService,
+		}
+		publishingAgent := agent.NewPublishingAgent(reviewService, engineCfg, deps)
+		videoService.SetPublishingAgent(publishingAgent)
+		log.Println("[Agent] PublishingAgent 已启用")
+	}
+
 	aiGroup := r.Group("/ai")
 	aiGroup.Use(jwt.JWTAuth(accountRepository, cache))
 	{
@@ -327,9 +350,26 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rdb *redis.Client, rmq *ra
 		adminReviewGroup.GET("/pending", reviewHandler.GetPendingVideos)
 	}
 
-	// 事后复审 Worker (热门/举报/流量突增)
-	if reviewService.IsEnabled() {
-		reviewWorker := worker.NewReviewWorker(db, reviewService)
+	// 事后复审 Worker (Agent模式: 热门/举报/流量突增/定时抽检)
+	if reviewService.IsEnabled() && reviewCfg.AgentEnabled {
+		engineCfg := agent.EngineConfig{
+			Model:     reviewCfg.TextModel,
+			BaseURL:   reviewCfg.BaseURL,
+			APIKey:    reviewCfg.APIKey,
+			MaxRounds: reviewCfg.AgentMaxRounds,
+			Timeout:   time.Duration(reviewCfg.AgentTimeoutSec) * time.Second,
+		}
+		deps := agent.ToolboxDeps{
+			ReviewService: reviewService,
+			AIService:     aiService,
+		}
+		triageAgent := agent.NewTriageAgent(engineCfg, deps)
+		postReviewAgent := agent.NewPostReviewAgent(engineCfg, deps, triageAgent)
+		reviewWorker := worker.NewReviewWorker(db, reviewService, postReviewAgent)
+		reviewWorker.Start()
+		log.Println("[Agent] PostReviewAgent 已启用")
+	} else if reviewService.IsEnabled() {
+		reviewWorker := worker.NewReviewWorker(db, reviewService, nil)
 		reviewWorker.Start()
 	}
 

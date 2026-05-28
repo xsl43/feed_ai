@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -169,43 +170,64 @@ func (s *ReviewService) ExtractFrames(videoPath, outputDir string, numFrames int
 		return nil, err
 	}
 
-	outputPattern := filepath.Join(outputDir, "frame_%d.jpg")
-
-	cmd := exec.Command("ffmpeg",
-		"-y",
-		"-i", videoPath,
-		"-vf", fmt.Sprintf("fps=1/30,select='not(mod(n\\,floor(30*N/%d)))'", numFrames),
-		"-frames:v", fmt.Sprintf("%d", numFrames),
-		"-q:v", "3",
-		outputPattern,
-	)
-	cmd.Stderr = nil
-	cmd.Stdout = nil
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("ffmpeg启动失败: %w", err)
+	if numFrames < 1 {
+		numFrames = 3
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			return nil, fmt.Errorf("ffmpeg抽帧失败: %w", err)
-		}
-	case <-time.After(5 * time.Minute):
-		cmd.Process.Kill()
-		return nil, fmt.Errorf("ffmpeg抽帧超时")
+	// Get video duration for timestamp-based extraction (more reliable than select filter)
+	durCmd := exec.Command("ffprobe",
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "csv=p=0",
+		videoPath,
+	)
+	durOut, err := durCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("获取视频时长失败: %w", err)
+	}
+	duration, _ := strconv.ParseFloat(strings.TrimSpace(string(durOut)), 64)
+	if duration <= 0 {
+		return nil, fmt.Errorf("无法获取视频时长")
 	}
 
 	var frames []string
-	for i := 1; i <= numFrames; i++ {
-		p := filepath.Join(outputDir, fmt.Sprintf("frame_%d.jpg", i))
-		if _, err := os.Stat(p); err == nil {
-			frames = append(frames, p)
+	for i := 0; i < numFrames; i++ {
+		t := duration * float64(i+1) / float64(numFrames+1)
+		output := filepath.Join(outputDir, fmt.Sprintf("frame_%d.jpg", i+1))
+
+		cmd := exec.Command("ffmpeg",
+			"-y",
+			"-ss", fmt.Sprintf("%.3f", t),
+			"-i", videoPath,
+			"-frames:v", "1",
+			"-q:v", "3",
+			output,
+		)
+		cmd.Stderr = nil
+		cmd.Stdout = nil
+
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("ffmpeg抽帧失败(%.1fs): %w", t, err)
+		}
+
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				continue // skip failed frames, try next
+			}
+		case <-time.After(30 * time.Second):
+			cmd.Process.Kill()
+			continue
+		}
+
+		if _, err := os.Stat(output); err == nil {
+			frames = append(frames, output)
 		}
 	}
+
 	return frames, nil
 }
 
@@ -299,10 +321,18 @@ func (s *ReviewService) ReviewAllDimensions(title, desc, coverPath, videoPath st
 		go func() {
 			defer wg.Done()
 			if len(framePaths) == 0 && videoPath != "" {
-				// Need to extract frames first
-				// For now skip if no pre-extracted frames
-				results <- dimResult{"frame", &ReviewResult{Status: "approved", Confidence: 1.0}}
-				return
+				tmpDir, err := os.MkdirTemp("", "frames_*")
+				if err != nil {
+					results <- dimResult{"frame", nil}
+					return
+				}
+				defer os.RemoveAll(tmpDir)
+				frames, err := s.ExtractFrames(videoPath, tmpDir, s.cfg.SampleFrames)
+				if err != nil {
+					results <- dimResult{"frame", nil}
+					return
+				}
+				framePaths = frames
 			}
 			r, err := s.ReviewFrames(framePaths)
 			if err != nil {
@@ -454,6 +484,11 @@ func (s *ReviewService) callVisionLLM(imageDataURL, systemPrompt string) (*Revie
 	return s.doLLMCall(url, reqBody)
 }
 
+// ExtractTextFromFrame extracts text from a frame image using the OCR model.
+func (s *ReviewService) ExtractTextFromFrame(imageDataURL string) (string, error) {
+	return s.callOCR(imageDataURL)
+}
+
 // callOCR extracts text from an image using the OCR model.
 func (s *ReviewService) callOCR(imageDataURL string) (string, error) {
 	url := s.cfg.BaseURL + "/chat/completions"
@@ -592,44 +627,3 @@ func extractJSON(s string) string {
 	return s
 }
 
-// ReviewJob represents a review task
-type ReviewJob struct {
-	Video     interface{} // will be *video.Video
-	VideoPath string
-	OnDone    func(videoID uint, status string, result *ReviewResult, allResults map[string]*ReviewResult)
-}
-
-// ReviewWorkerPool controls concurrency of review tasks
-type ReviewWorkerPool struct {
-	queue   chan ReviewJob
-	service *ReviewService
-}
-
-// NewReviewWorkerPool creates a worker pool
-func NewReviewWorkerPool(service *ReviewService, maxWorkers int) *ReviewWorkerPool {
-	if maxWorkers <= 0 {
-		maxWorkers = 10
-	}
-	p := &ReviewWorkerPool{
-		queue:   make(chan ReviewJob, 100),
-		service: service,
-	}
-	for i := 0; i < maxWorkers; i++ {
-		go p.worker()
-	}
-	return p
-}
-
-func (p *ReviewWorkerPool) worker() {
-	for job := range p.queue {
-		// Placeholder: actual review logic wired by caller
-		if job.OnDone != nil {
-			_ = job
-		}
-	}
-}
-
-// Submit adds a review job to the queue
-func (p *ReviewWorkerPool) Submit(job ReviewJob) {
-	p.queue <- job
-}

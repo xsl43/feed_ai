@@ -126,16 +126,11 @@ func (vh *VideoHandler) UploadVideo(c *gin.Context) {
 		return
 	}
 
-	// 5. ffprobe 流完整性 + 时长校验
-	probe, err := probeVideo(absPath)
+	// 5. ffprobe 流完整性校验
+	_, err = probeVideo(absPath)
 	if err != nil {
 		os.Remove(absPath)
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("视频文件无效: %v", err)})
-		return
-	}
-	if probe.Duration < float64(cfg.MinVideoDurationSec) || probe.Duration > float64(cfg.MaxVideoDurationSec) {
-		os.Remove(absPath)
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("视频时长需在 %ds ~ %ds 之间", cfg.MinVideoDurationSec, cfg.MaxVideoDurationSec)})
 		return
 	}
 
